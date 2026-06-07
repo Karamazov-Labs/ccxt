@@ -34,6 +34,7 @@ export default class kinesis extends Exchange {
                 'fetchMarkets': true,
                 'fetchOHLCV': true,
                 'fetchOpenOrders': true,
+                'fetchOrder': true,
                 'fetchOrderBook': true,
                 'fetchTicker': true,
                 'transfer': true,
@@ -66,6 +67,7 @@ export default class kinesis extends Exchange {
                         'exchange/mid-price/{pair}',
                         'exchange/holdings',
                         'exchange/orders/open',
+                        'exchange/orders/{id}',
                         'exchange/reporting/account-balance-statement',
                         'exchange/reporting/account-balance-statement/{currency}',
                     ],
@@ -116,7 +118,12 @@ export default class kinesis extends Exchange {
                     },
                     'createOrders': undefined,
                     'fetchMyTrades': undefined,
-                    'fetchOrder': undefined,
+                    'fetchOrder': {
+                        'marginMode': false,
+                        'trigger': false,
+                        'trailing': false,
+                        'symbolRequired': false,
+                    },
                     'fetchOpenOrders': {
                         'marginMode': false,
                         'limit': undefined,
@@ -467,6 +474,15 @@ export default class kinesis extends Exchange {
             'id': id,
         };
         const response = await this.privateDeleteExchangeOrdersId (this.extend (request, params));
+        return this.parseOrder (response);
+    }
+
+    async fetchOrder (id: string, symbol: Str = undefined, params = {}) {
+        await this.loadMarkets ();
+        const request = {
+            'id': id,
+        };
+        const response = await this.privateGetExchangeOrdersId (this.extend (request, params));
         return this.parseOrder (response);
     }
 
