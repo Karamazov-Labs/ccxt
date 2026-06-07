@@ -472,11 +472,13 @@ export default class kinesis extends Exchange {
 
     async fetchOpenOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Order[]> {
         await this.loadMarkets ();
-        const response = await this.privateGetExchangeOrdersOpen (params);
+        const request: Dict = {};
         let market = undefined;
         if (symbol !== undefined) {
             market = this.market (symbol);
+            request['currencyPairId'] = market['id'];
         }
+        const response = await this.privateGetExchangeOrdersOpen (this.extend (request, params));
         return this.parseOrders (response, market, since, limit);
     }
 
