@@ -145,7 +145,9 @@ export default class kinesis extends Exchange {
                     'In sufficient funds': InsufficientFunds,
                     'Not authorised': AuthenticationError,
                 },
-                'broad': {},
+                'broad': {
+                    'Failed to reserve balance': InsufficientFunds,
+                },
             },
         });
     }
