@@ -1,7 +1,7 @@
 //  ---------------------------------------------------------------------------
 
 import Exchange from './abstract/kinesis.js';
-import { ExchangeError, AuthenticationError, ArgumentsRequired, BadRequest, InsufficientFunds } from './base/errors.js';
+import { ExchangeError, AuthenticationError, ArgumentsRequired, BadRequest, InsufficientFunds, RateLimitExceeded } from './base/errors.js';
 import { TICK_SIZE } from './base/functions/number.js';
 import { sha256 } from './static_dependencies/noble-hashes/sha256.js';
 import type { Balances, Dict, Int, Market, Num, Order, OrderBook, OrderSide, OrderType, Str, Ticker, OHLCV, LedgerEntry, Currency, Transaction, TransferEntry } from './base/types.js';
@@ -147,6 +147,8 @@ export default class kinesis extends Exchange {
                 },
                 'broad': {
                     'Failed to reserve balance': InsufficientFunds,
+                    'Rate Limit Exceeded': RateLimitExceeded,
+                    'Too Many Requests': RateLimitExceeded,
                 },
             },
         });
@@ -406,7 +408,7 @@ export default class kinesis extends Exchange {
         return type;
     }
 
-    async createOrder (symbol: string, type: OrderType, side: OrderSide, amount: number, price: Num = undefined, params = {}) {
+    async createOrder (symbol: string, type: OrderType, side: OrderSide, amount: number, price: Num = undefined, params = {}): Promise<Order> {
         await this.loadMarkets ();
         const market = this.market (symbol);
         const request: Dict = {
@@ -433,6 +435,7 @@ export default class kinesis extends Exchange {
         const type = this.safeString (order, 'orderType');
         const price = this.safeString (order, 'limitPrice');
         const amount = this.safeString (order, 'amount');
+        const remaining = this.safeString (order, 'remaining');
         const status = this.parseOrderStatus (this.safeString (order, 'status'));
         const datetime = this.safeString (order, 'dateTime');
         const timestamp = this.parse8601 (datetime);
@@ -454,7 +457,7 @@ export default class kinesis extends Exchange {
             'cost': undefined,
             'average': undefined,
             'filled': undefined,
-            'remaining': undefined,
+            'remaining': remaining,
             'status': status,
             'fee': undefined,
             'trades': undefined,
@@ -472,7 +475,7 @@ export default class kinesis extends Exchange {
         return this.safeString (statuses, status, status);
     }
 
-    async cancelOrder (id: string, symbol: Str = undefined, params = {}) {
+    async cancelOrder (id: string, symbol: Str = undefined, params = {}): Promise<Order> {
         const request = {
             'id': id,
         };
@@ -480,7 +483,7 @@ export default class kinesis extends Exchange {
         return this.parseOrder (response);
     }
 
-    async fetchOrder (id: string, symbol: Str = undefined, params = {}) {
+    async fetchOrder (id: string, symbol: Str = undefined, params = {}): Promise<Order> {
         await this.loadMarkets ();
         const request = {
             'id': id,
@@ -518,23 +521,30 @@ export default class kinesis extends Exchange {
 
     parseTransaction (transaction: Dict, currency: Currency = undefined): Transaction {
         const id = this.safeString (transaction, 'id');
+        const amount = this.safeNumber (transaction, 'amount');
+        const address = this.safeString (transaction, 'address');
+        const tag = this.safeString (transaction, 'memo');
+        const datetime = this.safeString (transaction, 'dateTime');
+        const timestamp = this.parse8601 (datetime);
+        const currencyId = this.safeString (transaction, 'currencyCode');
+        const code = this.safeCurrencyCode (currencyId, currency);
         return {
             'info': transaction,
             'id': id,
             'txid': undefined,
-            'timestamp': undefined,
-            'datetime': undefined,
+            'timestamp': timestamp,
+            'datetime': datetime,
             'network': undefined,
-            'address': undefined,
-            'addressTo': undefined,
+            'address': address,
+            'addressTo': address,
             'addressFrom': undefined,
-            'tag': undefined,
-            'tagTo': undefined,
+            'tag': tag,
+            'tagTo': tag,
             'tagFrom': undefined,
-            'type': undefined,
-            'amount': undefined,
-            'currency': this.safeCurrencyCode (undefined, currency),
-            'status': undefined,
+            'type': 'withdrawal',
+            'amount': amount,
+            'currency': code,
+            'status': 'ok',
             'updated': undefined,
             'comment': undefined,
             'internal': undefined,
