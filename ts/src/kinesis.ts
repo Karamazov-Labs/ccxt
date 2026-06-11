@@ -465,6 +465,7 @@ export default class kinesis extends Exchange {
         const statuses: Dict = {
             'open': 'open',
             'filled': 'closed',
+            'fill': 'closed',
             'cancelled': 'canceled',
             'rejected': 'rejected',
         };
