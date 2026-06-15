@@ -480,6 +480,19 @@ export default class kinesis extends Exchange {
             'id': id,
         };
         const response = await this.privateDeleteExchangeOrdersId (this.extend (request, params));
+        const success = this.safeValue (response, 'success');
+        const message = this.safeString (response, 'message');
+        if ((success !== undefined && success) || (message !== undefined && message.indexOf ('success') >= 0)) {
+            let market = undefined;
+            if (symbol !== undefined) {
+                market = this.market (symbol);
+            }
+            return this.safeOrder ({
+                'id': id,
+                'info': response,
+                'status': 'canceled',
+            }, market);
+        }
         return this.parseOrder (response);
     }
 
