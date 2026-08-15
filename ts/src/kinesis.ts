@@ -422,14 +422,14 @@ export default class kinesis extends Exchange {
         const request: Dict = {
             'currencyPairId': market['id'],
             'direction': side,
-            'amount': amount,
+            'amount': this.parseNumber (this.amountToPrecision (symbol, amount)),
             'orderType': type,
         };
         if (type === 'limit') {
             if (price === undefined) {
                 throw new ArgumentsRequired (this.id + ' createOrder() requires a price argument for limit orders');
             }
-            request['limitPrice'] = price;
+            request['limitPrice'] = this.parseNumber (this.priceToPrecision (symbol, price));
         }
         const response = await this.privatePostExchangeOrders (this.extend (request, params));
         return this.parseOrder (response, market);

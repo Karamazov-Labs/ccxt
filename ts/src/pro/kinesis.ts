@@ -2,7 +2,8 @@
 
 import kinesisRest from '../kinesis.js';
 import { ArrayCache } from '../base/ws/Cache.js';
-import type { Int, Trade, OrderBook, Ticker, Market, Dict } from '../base/types.js';
+import { ExchangeError } from '../base/errors.js';
+import type { Int, Trade, OrderBook, Ticker, Market, Dict, Strings, Tickers } from '../base/types.js';
 import Client from '../base/ws/Client.js';
 
 //  ---------------------------------------------------------------------------
@@ -13,7 +14,7 @@ export default class kinesis extends kinesisRest {
             'has': {
                 'ws': true,
                 'watchTicker': true,
-                'watchTickers': false,
+                'watchTickers': true,
                 'watchTrades': true,
                 'watchTradesForSymbols': false,
                 'watchMyTrades': false,
@@ -48,6 +49,26 @@ export default class kinesis extends kinesisRest {
         };
         const request = this.deepExtend (subscribe, params);
         return await this.watch (url, messageHash, request, messageHash);
+    }
+
+    override async watchTickers (symbols: Strings = undefined, params = {}): Promise<Tickers> {
+        await this.loadMarkets ();
+        symbols = this.marketSymbols (symbols, undefined, false);
+        const url = this.safeString (this.options, 'ws', this.urls['api']['ws']);
+        const messageHashes = [];
+        for (let i = 0; i < symbols.length; i++) {
+            const symbol = symbols[i];
+            const messageHash = 'ticker:' + symbol;
+            messageHashes.push (messageHash);
+            const subscribe: Dict = {
+                'event': 'subscribe',
+                'channel': 'ticker',
+                'symbol': symbol,
+            };
+            const request = this.deepExtend (subscribe, params);
+            this.watch (url, messageHash, request, messageHash);
+        }
+        return await this.watchMultiple (url, messageHashes, undefined, messageHashes);
     }
 
     override async watchTrades (symbol: string, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Trade[]> {
@@ -104,6 +125,10 @@ export default class kinesis extends kinesisRest {
         if (event === 'subscribed' || event === 'pong') {
             return;
         }
+        if (event === 'error') {
+            this.handleErrorMessage (client, message);
+            return;
+        }
         const channel = this.safeString (message, 'channel');
         if (channel === 'ticker') {
             this.handleTicker (client, message);
@@ -112,6 +137,22 @@ export default class kinesis extends kinesisRest {
         } else if (channel === 'trades') {
             this.handleTrades (client, message);
         }
+    }
+
+    handleErrorMessage (client: Client, message: any): boolean {
+        const error = this.safeString2 (message, 'message', 'error');
+        if (error !== undefined) {
+            const feedback = this.id + ' ' + this.json (message);
+            try {
+                this.throwExactlyMatchedException (this.exceptions['exact'], error, feedback);
+                this.throwBroadlyMatchedException (this.exceptions['broad'], error, feedback);
+                throw new ExchangeError (feedback);
+            } catch (e) {
+                client.reject (e);
+            }
+            return true;
+        }
+        return false;
     }
 
     handleTicker (client: Client, message: any) {
