@@ -8,7 +8,7 @@ import Client from '../base/ws/Client.js';
 //  ---------------------------------------------------------------------------
 
 export default class kinesis extends kinesisRest {
-    describe (): any {
+    override describe (): any {
         return this.deepExtend (super.describe (), {
             'has': {
                 'ws': true,
@@ -35,11 +35,11 @@ export default class kinesis extends kinesisRest {
         });
     }
 
-    async watchTicker (symbol: string, params = {}): Promise<Ticker> {
+    override async watchTicker (symbol: string, params = {}): Promise<Ticker> {
         await this.loadMarkets ();
         const market = this.market (symbol);
         symbol = market['symbol'];
-        const url = this.urls['api']['ws'];
+        const url = this.safeString (this.options, 'ws', this.urls['api']['ws']);
         const messageHash = 'ticker:' + symbol;
         const subscribe: Dict = {
             'event': 'subscribe',
@@ -50,11 +50,11 @@ export default class kinesis extends kinesisRest {
         return await this.watch (url, messageHash, request, messageHash);
     }
 
-    async watchTrades (symbol: string, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Trade[]> {
+    override async watchTrades (symbol: string, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Trade[]> {
         await this.loadMarkets ();
         const market = this.market (symbol);
         symbol = market['symbol'];
-        const url = this.urls['api']['ws'];
+        const url = this.safeString (this.options, 'ws', this.urls['api']['ws']);
         const messageHash = 'trades:' + symbol;
         const subscribe: Dict = {
             'event': 'subscribe',
@@ -69,11 +69,11 @@ export default class kinesis extends kinesisRest {
         return this.filterBySinceLimit (trades, since, limit, 'timestamp', true);
     }
 
-    async watchOrderBook (symbol: string, limit: Int = undefined, params = {}): Promise<OrderBook> {
+    override async watchOrderBook (symbol: string, limit: Int = undefined, params = {}): Promise<OrderBook> {
         await this.loadMarkets ();
         const market = this.market (symbol);
         symbol = market['symbol'];
-        const url = this.urls['api']['ws'];
+        const url = this.safeString (this.options, 'ws', this.urls['api']['ws']);
         const messageHash = 'orderbook:' + symbol;
         const subscribe: Dict = {
             'event': 'subscribe',
@@ -85,7 +85,7 @@ export default class kinesis extends kinesisRest {
         return orderbook.limit ();
     }
 
-    handleMessage (client: Client, message) {
+    override handleMessage (client: Client, message: any) {
         if (message === '') {
             return;
         }
@@ -97,7 +97,11 @@ export default class kinesis extends kinesisRest {
             }
         }
         const event = this.safeString (message, 'event');
-        if (event === 'subscribed') {
+        if (event === 'ping' || message === 'ping') {
+            client.send ({ 'event': 'pong' });
+            return;
+        }
+        if (event === 'subscribed' || event === 'pong') {
             return;
         }
         const channel = this.safeString (message, 'channel');
@@ -110,10 +114,13 @@ export default class kinesis extends kinesisRest {
         }
     }
 
-    handleTicker (client: Client, message) {
+    handleTicker (client: Client, message: any) {
         const symbol = this.safeString (message, 'symbol');
+        if (symbol === undefined) {
+            return;
+        }
         const market = this.market (symbol);
-        const data = this.safeDict (message, 'data', {});
+        const data = this.safeDict (message, 'data', message);
         const last = this.safeString (data, 'last');
         const timestamp = this.safeInteger (message, 'timestamp', this.milliseconds ());
         const ticker = this.safeTicker ({
@@ -143,8 +150,11 @@ export default class kinesis extends kinesisRest {
         client.resolve (ticker, messageHash);
     }
 
-    handleOrderBook (client: Client, message) {
+    handleOrderBook (client: Client, message: any) {
         const symbol = this.safeString (message, 'symbol');
+        if (symbol === undefined) {
+            return;
+        }
         const messageHash = 'orderbook:' + symbol;
         const timestamp = this.safeInteger (message, 'timestamp', this.milliseconds ());
         const data = this.safeDict (message, 'data', {});
@@ -157,10 +167,16 @@ export default class kinesis extends kinesisRest {
         client.resolve (orderbook, messageHash);
     }
 
-    handleTrades (client: Client, message) {
+    handleTrades (client: Client, message: any) {
         const symbol = this.safeString (message, 'symbol');
+        if (symbol === undefined) {
+            return;
+        }
         const market = this.market (symbol);
-        const data = this.safeList (message, 'data', []);
+        let data = this.safeValue (message, 'data', []);
+        if (data && !Array.isArray (data)) {
+            data = [ data ];
+        }
         let stored = this.safeValue (this.trades, symbol);
         if (stored === undefined) {
             const limit = this.safeInteger (this.options, 'tradesLimit', 1000);
@@ -176,18 +192,19 @@ export default class kinesis extends kinesisRest {
         client.resolve (stored, messageHash);
     }
 
-    parseTrade (trade: Dict, market: Market = undefined): Trade {
+    override parseTrade (trade: Dict, market: Market = undefined): Trade {
         const timestamp = this.safeInteger (trade, 'timestamp');
         const id = this.safeString (trade, 'id');
         const price = this.safeString (trade, 'price');
         const amount = this.safeString (trade, 'amount');
         const side = this.safeString (trade, 'side');
+        const symbol = this.safeSymbol (undefined, market);
         return this.safeTrade ({
             'id': id,
             'info': trade,
             'timestamp': timestamp,
             'datetime': this.iso8601 (timestamp),
-            'symbol': market['symbol'],
+            'symbol': symbol,
             'order': undefined,
             'type': undefined,
             'side': side,

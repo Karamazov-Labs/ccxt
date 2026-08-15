@@ -1,10 +1,10 @@
 //  ---------------------------------------------------------------------------
 
 import Exchange from './abstract/kinesis.js';
-import { ExchangeError, AuthenticationError, ArgumentsRequired, BadRequest, InsufficientFunds, RateLimitExceeded } from './base/errors.js';
+import { ExchangeError, AuthenticationError, ArgumentsRequired, BadRequest, InsufficientFunds, RateLimitExceeded, OrderNotFound, BadSymbol, InvalidOrder } from './base/errors.js';
 import { TICK_SIZE } from './base/functions/number.js';
-import { sha256 } from './static_dependencies/noble-hashes/sha256.js';
-import type { Balances, Dict, Int, Market, Num, Order, OrderBook, OrderSide, OrderType, Str, Ticker, OHLCV, LedgerEntry, Currency, Transaction, TransferEntry } from './base/types.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import type { Balances, Dict, Int, Market, Num, Order, OrderBook, OrderSide, OrderType, Str, Ticker, OHLCV, LedgerEntry, Currency, Transaction, TransferEntry, int, List } from './base/types.js';
 
 //  ---------------------------------------------------------------------------
 
@@ -13,7 +13,7 @@ import type { Balances, Dict, Int, Market, Num, Order, OrderBook, OrderSide, Ord
  * @augments Exchange
  */
 export default class kinesis extends Exchange {
-    describe (): any {
+    override describe (): any {
         return this.deepExtend (super.describe (), {
             'id': 'kinesis',
             'name': 'Kinesis',
@@ -43,7 +43,7 @@ export default class kinesis extends Exchange {
             'urls': {
                 'logo': 'https://user-images.githubusercontent.com/1294454/27891111-02b9e69c-61d4-11e7-8b0c-4fa81781b0a8.png',
                 'api': {
-                    'rest': 'https://api.kinesis.money',
+                    'rest': 'https://client-api.kinesis.money',
                 },
                 'www': 'https://kinesis.money',
                 'doc': [
@@ -144,6 +144,11 @@ export default class kinesis extends Exchange {
                     'Forbidden resource': AuthenticationError,
                     'In sufficient funds': InsufficientFunds,
                     'Not authorised': AuthenticationError,
+                    'Order not found': OrderNotFound,
+                    'Currency pair not found': BadSymbol,
+                    'Invalid amount': InvalidOrder,
+                    'Invalid price': InvalidOrder,
+                    'Invalid order type': InvalidOrder,
                 },
                 'broad': {
                     'Failed to reserve balance': InsufficientFunds,
@@ -154,9 +159,9 @@ export default class kinesis extends Exchange {
         });
     }
 
-    async fetchMarkets (params = {}): Promise<Market[]> {
-        const response = await this.privateGetExchangePairs (params);
-        const result = [];
+    override async fetchMarkets (params = {}): Promise<Market[]> {
+        const response: any = await this.privateGetExchangePairs (params);
+        const result: List = [];
         for (let i = 0; i < response.length; i++) {
             const market = response[i];
             const id = this.safeString (market, 'currencyPairId');
@@ -216,23 +221,24 @@ export default class kinesis extends Exchange {
                         'max': undefined,
                     },
                 },
+                'created': undefined,
                 'info': market,
             });
         }
         return result;
     }
 
-    async fetchTicker (symbol: string, params = {}): Promise<Ticker> {
+    override async fetchTicker (symbol: string, params = {}): Promise<Ticker> {
         await this.loadMarkets ();
         const market = this.market (symbol);
-        const request = {
+        const request: Dict = {
             'pair': market['id'],
         };
         const response = await this.privateGetExchangeMidPricePair (this.extend (request, params));
         return this.parseTicker (response, market);
     }
 
-    parseTicker (ticker: Dict, market: Market = undefined): Ticker {
+    override parseTicker (ticker: Dict, market: Market = undefined): Ticker {
         const symbol = this.safeSymbol (undefined, market);
         const last = this.safeString (ticker, 'mid_price');
         const timestamp = this.milliseconds ();
@@ -260,10 +266,10 @@ export default class kinesis extends Exchange {
         }, market);
     }
 
-    async fetchOrderBook (symbol: string, limit: Int = undefined, params = {}): Promise<OrderBook> {
+    override async fetchOrderBook (symbol: string, limit: Int = undefined, params = {}): Promise<OrderBook> {
         await this.loadMarkets ();
         const market = this.market (symbol);
-        const request = {
+        const request: Dict = {
             'pair': market['id'],
         };
         const response = await this.privateGetExchangeDepthPair (this.extend (request, params));
@@ -271,10 +277,10 @@ export default class kinesis extends Exchange {
         return this.parseOrderBook (depthItems, market['symbol'], undefined, 'bid', 'ask', 'price', 'amount');
     }
 
-    async fetchOHLCV (symbol: string, timeframe: string = '1m', since: Int = undefined, limit: Int = undefined, params = {}): Promise<OHLCV[]> {
+    override async fetchOHLCV (symbol: string, timeframe: string = '1m', since: Int = undefined, limit: Int = undefined, params = {}): Promise<OHLCV[]> {
         await this.loadMarkets ();
         const market = this.market (symbol);
-        const request = {
+        const request: Dict = {
             'pair': market['id'],
         };
         const timeframeValue = this.safeString (this.timeframes, timeframe);
@@ -289,10 +295,10 @@ export default class kinesis extends Exchange {
         }
         request['toDate'] = this.iso8601 (this.milliseconds ());
         const response = await this.privateGetExchangeOhlcPair (this.extend (request, params));
-        return this.parseOHLCVs (response, market, timeframe, since, limit);
+        return this.parseOHLCVs (response as any, market, timeframe, since, limit);
     }
 
-    parseOHLCV (ohlcv, market: Market = undefined): OHLCV {
+    override parseOHLCV (ohlcv: any, market: Market = undefined): OHLCV {
         const datetime = this.safeStringN (ohlcv, [ 'time', 'timestamp', 'date', 'at', 'dateTime', 'datetime' ]);
         const timestamp = this.parse8601 (datetime);
         return [
@@ -305,13 +311,13 @@ export default class kinesis extends Exchange {
         ];
     }
 
-    async fetchBalance (params = {}): Promise<Balances> {
+    override async fetchBalance (params = {}): Promise<Balances> {
         await this.loadMarkets ();
         const response = await this.privateGetExchangeHoldings (params);
         return this.parseBalance (response);
     }
 
-    parseBalance (response): Balances {
+    override parseBalance (response: Dict): Balances {
         const result: Dict = { 'info': response };
         const keys = Object.keys (response);
         for (let i = 0; i < keys.length; i++) {
@@ -321,12 +327,14 @@ export default class kinesis extends Exchange {
             const account = this.account ();
             account['free'] = this.safeString (entry, 'available');
             account['used'] = this.safeString (entry, 'allocatedOnExchange');
-            result[code] = account;
+            if (code !== undefined) {
+                result[code] = account;
+            }
         }
         return this.safeBalance (result);
     }
 
-    async fetchLedger (code: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<LedgerEntry[]> {
+    override async fetchLedger (code: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<LedgerEntry[]> {
         await this.loadMarkets ();
         let currency = undefined;
         const request: Dict = {};
@@ -341,7 +349,7 @@ export default class kinesis extends Exchange {
         return this.parseLedger (response, currency, since, limit);
     }
 
-    parseLedgerEntry (item: Dict, currency: Currency = undefined): LedgerEntry {
+    override parseLedgerEntry (item: Dict, currency: Currency = undefined): LedgerEntry {
         const id = this.safeString (item, 'Transaction_ID');
         const datetime = this.safeString (item, 'DateTime');
         const timestamp = this.parse8601 (datetime);
@@ -408,7 +416,7 @@ export default class kinesis extends Exchange {
         return type;
     }
 
-    async createOrder (symbol: string, type: OrderType, side: OrderSide, amount: number, price: Num = undefined, params = {}): Promise<Order> {
+    override async createOrder (symbol: string, type: OrderType, side: OrderSide, amount: number, price: Num = undefined, params = {}): Promise<Order> {
         await this.loadMarkets ();
         const market = this.market (symbol);
         const request: Dict = {
@@ -427,7 +435,7 @@ export default class kinesis extends Exchange {
         return this.parseOrder (response, market);
     }
 
-    parseOrder (order: Dict, market: Market = undefined): Order {
+    override parseOrder (order: Dict, market: Market = undefined): Order {
         const id = this.safeString (order, 'id');
         const marketId = this.safeString (order, 'currencyPairId');
         const symbol = this.safeSymbol (marketId, market);
@@ -444,7 +452,7 @@ export default class kinesis extends Exchange {
             'id': id,
             'clientOrderId': undefined,
             'timestamp': timestamp,
-            'datetime': datetime,
+            'datetime': this.iso8601 (timestamp),
             'lastTradeTimestamp': undefined,
             'symbol': symbol,
             'type': type,
@@ -475,37 +483,41 @@ export default class kinesis extends Exchange {
         return this.safeString (statuses, status, status);
     }
 
-    async cancelOrder (id: string, symbol: Str = undefined, params = {}): Promise<Order> {
-        const request = {
+    override async cancelOrder (id: string, symbol: Str = undefined, params = {}): Promise<Order> {
+        let market = undefined;
+        if (symbol !== undefined) {
+            market = this.market (symbol);
+        }
+        const request: Dict = {
             'id': id,
         };
         const response = await this.privateDeleteExchangeOrdersId (this.extend (request, params));
-        const success = this.safeValue (response, 'success');
+        const success = this.safeBool (response, 'success');
         const message = this.safeString (response, 'message');
         if ((success !== undefined && success) || (message !== undefined && message.indexOf ('success') >= 0)) {
-            let market = undefined;
-            if (symbol !== undefined) {
-                market = this.market (symbol);
-            }
             return this.safeOrder ({
                 'id': id,
                 'info': response,
                 'status': 'canceled',
             }, market);
         }
-        return this.parseOrder (response);
+        return this.parseOrder (response, market);
     }
 
-    async fetchOrder (id: string, symbol: Str = undefined, params = {}): Promise<Order> {
+    override async fetchOrder (id: string, symbol: Str = undefined, params = {}): Promise<Order> {
         await this.loadMarkets ();
-        const request = {
+        let market = undefined;
+        if (symbol !== undefined) {
+            market = this.market (symbol);
+        }
+        const request: Dict = {
             'id': id,
         };
         const response = await this.privateGetExchangeOrdersId (this.extend (request, params));
-        return this.parseOrder (response);
+        return this.parseOrder (response, market);
     }
 
-    async fetchOpenOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Order[]> {
+    override async fetchOpenOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Order[]> {
         await this.loadMarkets ();
         const request: Dict = {};
         let market = undefined;
@@ -517,10 +529,10 @@ export default class kinesis extends Exchange {
         return this.parseOrders (response, market, since, limit);
     }
 
-    async withdraw (code: string, amount: number, address: string, tag: Str = undefined, params = {}): Promise<Transaction> {
+    override async withdraw (code: string, amount: number, address: string, tag: Str = undefined, params = {}): Promise<Transaction> {
         await this.loadMarkets ();
         const currency = this.currency (code);
-        const request = {
+        const request: Dict = {
             'amount': amount,
             'currencyCode': currency['id'],
             'address': address,
@@ -532,7 +544,7 @@ export default class kinesis extends Exchange {
         return this.parseTransaction (response, currency);
     }
 
-    parseTransaction (transaction: Dict, currency: Currency = undefined): Transaction {
+    override parseTransaction (transaction: Dict, currency: Currency = undefined): Transaction {
         const id = this.safeString (transaction, 'id');
         const amount = this.safeNumber (transaction, 'amount');
         const address = this.safeString (transaction, 'address');
@@ -546,7 +558,7 @@ export default class kinesis extends Exchange {
             'id': id,
             'txid': undefined,
             'timestamp': timestamp,
-            'datetime': datetime,
+            'datetime': this.iso8601 (timestamp),
             'network': undefined,
             'address': address,
             'addressTo': address,
@@ -565,10 +577,10 @@ export default class kinesis extends Exchange {
         };
     }
 
-    async transfer (code: string, amount: number, fromAccount: string, toAccount: string, params = {}): Promise<TransferEntry> {
+    override async transfer (code: string, amount: number, fromAccount: string, toAccount: string, params = {}): Promise<TransferEntry> {
         await this.loadMarkets ();
         const currency = this.currency (code);
-        const request = {
+        const request: Dict = {
             'amount': amount,
             'currencyCode': currency['id'],
             'receiverEmail': toAccount,
@@ -587,11 +599,11 @@ export default class kinesis extends Exchange {
         };
     }
 
-    nonce (): number {
+    override nonce (): number {
         return this.milliseconds ();
     }
 
-    sign (path, api = 'public', method = 'GET', params = {}, headers = undefined, body = undefined) {
+    override sign (path: string, api = 'public', method = 'GET', params: Dict = {}, headers: any = undefined, body: any = undefined) {
         let url = '/' + this.version + '/' + this.implodeParams (path, params);
         const query = this.omit (params, this.extractParams (path));
         this.checkRequiredCredentials ();
@@ -620,11 +632,11 @@ export default class kinesis extends Exchange {
         return { 'url': finalUrl, 'method': method, 'body': body, 'headers': headers };
     }
 
-    handleErrors (httpCode: number, reason: string, url: string, method: string, headers: Dict, body: string, response, requestHeaders, requestBody) {
+    override handleErrors (httpCode: int, reason: string, url: string, method: string, headers: Dict, body: string, response: any, requestHeaders: any, requestBody: any) {
         if (response === undefined) {
             return undefined;
         }
-        const message = this.safeString (response, 'message');
+        const message = this.safeString2 (response, 'message', 'error');
         if (message !== undefined) {
             const feedback = this.id + ' ' + body;
             this.throwExactlyMatchedException (this.exceptions['exact'], message, feedback);
